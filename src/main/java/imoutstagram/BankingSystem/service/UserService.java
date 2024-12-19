@@ -11,14 +11,13 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 
 @Service
-public class UserService implements UserServiceInterface {
+public class UserService {
     private final UserRepository userRepository;
 
     public UserService(UserRepository userRepository) {
         this.userRepository = userRepository;
     }
 
-    @Override
     public BankResponse createAccount(UserRequest userRequest) {
         if (this.userRepository.existsByEmail(userRequest.getEmail())) {
             BankResponse bankResponse = BankResponse.builder()
