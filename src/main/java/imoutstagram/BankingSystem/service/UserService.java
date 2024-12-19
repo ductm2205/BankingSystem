@@ -2,6 +2,7 @@ package imoutstagram.BankingSystem.service;
 
 import imoutstagram.BankingSystem.dto.AccountInfo;
 import imoutstagram.BankingSystem.dto.BankResponse;
+import imoutstagram.BankingSystem.dto.EmailDetails;
 import imoutstagram.BankingSystem.dto.UserRequest;
 import imoutstagram.BankingSystem.model.User;
 import imoutstagram.BankingSystem.repository.UserRepository;
@@ -13,9 +14,11 @@ import java.math.BigDecimal;
 @Service
 public class UserService {
     private final UserRepository userRepository;
+    private final EmailService emailService;
 
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository, EmailService emailService) {
         this.userRepository = userRepository;
+        this.emailService = emailService;
     }
 
     public BankResponse createAccount(UserRequest userRequest) {
@@ -38,6 +41,18 @@ public class UserService {
                 .status("Active")
                 .build();
         User savedUser = userRepository.save(user);
+
+        // send mail to new user
+        EmailDetails emailDetails = EmailDetails.builder()
+                .recipient(savedUser.getEmail())
+                .subject("Welcome, " + savedUser.getFirstName() + " " + savedUser.getLastName())
+                .body("We are so glad to have your belief!\n" +
+                        "Your account details are: \n" +
+                        "Account name: " + savedUser.getFirstName() + " " + savedUser.getLastName() + ",\n" +
+                        "Account number: " + savedUser.getAccountNumber() + ".\n" +
+                        "Hope that you are satisfied with our services!")
+                .build();
+        emailService.sendEmail(emailDetails);
 
         return BankResponse.builder()
                 .responseCode(AccountUtils.ACCOUNT_CREATED)
