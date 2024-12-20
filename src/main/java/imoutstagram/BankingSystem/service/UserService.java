@@ -1,9 +1,6 @@
 package imoutstagram.BankingSystem.service;
 
-import imoutstagram.BankingSystem.dto.AccountInfo;
-import imoutstagram.BankingSystem.dto.BankResponse;
-import imoutstagram.BankingSystem.dto.EmailDetails;
-import imoutstagram.BankingSystem.dto.UserRequest;
+import imoutstagram.BankingSystem.dto.*;
 import imoutstagram.BankingSystem.model.User;
 import imoutstagram.BankingSystem.repository.UserRepository;
 import imoutstagram.BankingSystem.utils.AccountUtils;
@@ -23,11 +20,10 @@ public class UserService {
 
     public BankResponse createAccount(UserRequest userRequest) {
         if (this.userRepository.existsByEmail(userRequest.getEmail())) {
-            BankResponse bankResponse = BankResponse.builder()
+            return BankResponse.builder()
                     .responseCode(AccountUtils.ACCOUNT_EXISTED_CODE)
                     .message(AccountUtils.ACCOUNT_EXISTED_MESSAGE)
                     .build();
-            return bankResponse;
         }
         User user = User
                 .builder()
@@ -61,6 +57,88 @@ public class UserService {
                         .accountBalance(savedUser.getBalance())
                         .accountNumber(savedUser.getAccountNumber())
                         .accountName(savedUser.getFirstName() + " " + savedUser.getLastName())
+                        .build())
+                .build();
+    }
+
+    public BankResponse balanceEnquiry(EnquiryRequest userRequest) {
+        // check if exist
+        if (!userRepository.existsByAccountNumber(userRequest.getAccountNumber())) {
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.ACCOUNT_NOT_EXISTED_CODE)
+                    .message(AccountUtils.ACCOUNT_NOT_EXISTED_MESSAGE)
+                    .build();
+        }
+        // find in db
+        User user = userRepository.findByAccountNumber(userRequest.getAccountNumber());
+        // return
+        return BankResponse.builder()
+                .responseCode(AccountUtils.ACCOUNT_FOUND_CODE)
+                .message(AccountUtils.ACCOUNT_FOUND_MESSAGE)
+                .accountInfo(AccountInfo.builder()
+                        .accountName(user.getFirstName() + " " + user.getLastName())
+                        .accountNumber(user.getAccountNumber())
+                        .accountBalance(user.getBalance())
+                        .build())
+                .build();
+    }
+
+    public String nameEnquiry(EnquiryRequest userRequest) {
+        // check if exist
+        if (!userRepository.existsByAccountNumber(userRequest.getAccountNumber())) {
+            return AccountUtils.ACCOUNT_NOT_EXISTED_MESSAGE;
+        }
+
+        // find in db
+        User user = userRepository.findByAccountNumber(userRequest.getAccountNumber());
+
+        return user.getFirstName() + " " + user.getLastName();
+    }
+
+    public BankResponse creditAccount(CreditDebitRequest request) {
+        // check if exist
+        if (!userRepository.existsByAccountNumber(request.getAccountNumber())) {
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.ACCOUNT_NOT_EXISTED_CODE)
+                    .message(AccountUtils.ACCOUNT_NOT_EXISTED_MESSAGE)
+                    .build();
+        }
+
+        // find in db
+        User user = userRepository.findByAccountNumber(request.getAccountNumber());
+
+        // unable to perform transaction
+        if (user.getBalance().compareTo(request.getAmount().abs()) < 0 && request.getAmount().compareTo(BigDecimal.ZERO) < 0) {
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.NOT_ENOUGH_BALANCES_CODE)
+                    .message(AccountUtils.NOT_ENOUGH_BALANCES_MESSAGE)
+                    .accountInfo(AccountInfo.builder()
+                            .accountNumber(user.getAccountNumber())
+                            .accountName(user.getFirstName() + " " + user.getLastName())
+                            .accountBalance(user.getBalance())
+                            .build())
+                    .build();
+        }
+
+        // update balance
+        try {
+            user.setBalance(user.getBalance().add(request.getAmount()));
+            userRepository.save(user);
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.OPERATION_FAILED_CODE)
+                    .message(AccountUtils.OPERATION_FAILED_MESSAGE)
+                    .build();
+        }
+        // resp
+        return BankResponse.builder()
+                .responseCode(AccountUtils.OPERATION_SUCCESSFUL_CODE)
+                .message(AccountUtils.OPERATION_SUCCESSFUL_MESSAGE)
+                .accountInfo(AccountInfo.builder()
+                        .accountNumber(user.getAccountNumber())
+                        .accountName(user.getFirstName() + " " + user.getLastName())
+                        .accountBalance(user.getBalance())
                         .build())
                 .build();
     }
