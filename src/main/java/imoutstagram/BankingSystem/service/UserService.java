@@ -63,29 +63,18 @@ public class UserService {
 
     public BankResponse balanceEnquiry(EnquiryRequest userRequest) {
         // check if exist
-        if (!userRepository.existsByAccountNumber(userRequest.getAccountNumber())) {
-            return BankResponse.builder()
-                    .responseCode(AccountUtils.ACCOUNT_NOT_EXISTED_CODE)
-                    .message(AccountUtils.ACCOUNT_NOT_EXISTED_MESSAGE)
-                    .build();
+        if (!isAccountExists(userRequest.getAccountNumber())) {
+            return createAccountNotExistResponse();
         }
         // find in db
         User user = userRepository.findByAccountNumber(userRequest.getAccountNumber());
         // return
-        return BankResponse.builder()
-                .responseCode(AccountUtils.ACCOUNT_FOUND_CODE)
-                .message(AccountUtils.ACCOUNT_FOUND_MESSAGE)
-                .accountInfo(AccountInfo.builder()
-                        .accountName(user.getFirstName() + " " + user.getLastName())
-                        .accountNumber(user.getAccountNumber())
-                        .accountBalance(user.getBalance())
-                        .build())
-                .build();
+        return createAccountExistResponse(user);
     }
 
     public String nameEnquiry(EnquiryRequest userRequest) {
         // check if exist
-        if (!userRepository.existsByAccountNumber(userRequest.getAccountNumber())) {
+        if (!isAccountExists(userRequest.getAccountNumber())) {
             return AccountUtils.ACCOUNT_NOT_EXISTED_MESSAGE;
         }
 
@@ -97,41 +86,192 @@ public class UserService {
 
     public BankResponse creditAccount(CreditDebitRequest request) {
         // check if exist
-        if (!userRepository.existsByAccountNumber(request.getAccountNumber())) {
-            return BankResponse.builder()
-                    .responseCode(AccountUtils.ACCOUNT_NOT_EXISTED_CODE)
-                    .message(AccountUtils.ACCOUNT_NOT_EXISTED_MESSAGE)
-                    .build();
+        if (!isAccountExists(request.getAccountNumber())) {
+            return createAccountNotExistResponse();
         }
 
         // find in db
         User user = userRepository.findByAccountNumber(request.getAccountNumber());
 
         // unable to perform transaction
-        if (user.getBalance().compareTo(request.getAmount().abs()) < 0 && request.getAmount().compareTo(BigDecimal.ZERO) < 0) {
-            return BankResponse.builder()
-                    .responseCode(AccountUtils.NOT_ENOUGH_BALANCES_CODE)
-                    .message(AccountUtils.NOT_ENOUGH_BALANCES_MESSAGE)
-                    .accountInfo(AccountInfo.builder()
-                            .accountNumber(user.getAccountNumber())
-                            .accountName(user.getFirstName() + " " + user.getLastName())
-                            .accountBalance(user.getBalance())
-                            .build())
-                    .build();
+        if (hasInsufficientBalance(user, request.getAmount())) {
+            return createNotEnoughBalanceResponse(user);
         }
 
         // update balance
+        boolean isCredited = credit(user, request.getAmount());
+
+        if (!isCredited) {
+            return createOperationFailedResponse();
+        }
+
+        // send notification
+        EmailDetails emailDetails = creditEmail(user, request.getAmount());
+        emailService.sendEmail(emailDetails);
+
+        // resp
+        return createOperationSuccessfulResponse(user);
+    }
+
+    public BankResponse debitAccount(CreditDebitRequest request) {
+        if (!isAccountExists(request.getAccountNumber())) {
+            return createAccountNotExistResponse();
+        }
+
+        User user = userRepository.findByAccountNumber(request.getAccountNumber());
+
+        if (hasInsufficientBalance(user, request.getAmount())) {
+            return createNotEnoughBalanceResponse(user);
+        }
+
+        boolean isDebited = debit(user, request.getAmount());
+
+        if (!isDebited) {
+            return createOperationFailedResponse();
+        }
+
+        // send notification
+        EmailDetails emailDetails = debitEmail(user, request.getAmount());
+        emailService.sendEmail(emailDetails);
+
+        return createOperationSuccessfulResponse(user);
+    }
+
+    public BankResponse transfer(TransferRequest request) {
+
+        // check if exist
+        if (!isAccountExists(request.getToUser())) {
+            return createAccountNotExistResponse();
+        }
+        if (!isAccountExists(request.getFromUser())) {
+            return createAccountNotExistResponse();
+        }
+
+        // perform transaction
+        User from = userRepository.findByAccountNumber(request.getFromUser());
+
+        // unable to perform transaction
+        if (hasInsufficientBalance(from, request.getAmount())) {
+            return createNotEnoughBalanceResponse(from);
+        }
+
+        // update balance
+        boolean isDebited = debit(from, request.getAmount());
+
+        if (!isDebited) {
+            return createOperationFailedResponse();
+        }
+
+        User to = userRepository.findByAccountNumber(request.getToUser());
+
+        //
+        boolean isCredited = credit(to, request.getAmount());
+        if (!isCredited) {
+            return createOperationFailedResponse();
+        }
+
+        EmailDetails debit = debitEmail(from, request.getAmount());
+        EmailDetails credit = creditEmail(to, request.getAmount());
+        emailService.sendEmail(credit);
+        emailService.sendEmail(debit);
+
+        return createOperationSuccessfulResponse(from);
+    }
+
+    private boolean isAccountExists(String accountNumber) {
+        return userRepository.existsByAccountNumber(accountNumber);
+    }
+
+    private boolean hasInsufficientBalance(User user, BigDecimal amount) {
+        return user.getBalance().compareTo(amount) < 0;
+    }
+
+    private boolean credit(User user, BigDecimal amount) {
+        //
         try {
-            user.setBalance(user.getBalance().add(request.getAmount()));
+            user.setBalance(user.getBalance().add(amount));
             userRepository.save(user);
         } catch (Exception e) {
             System.out.println(e.getMessage());
-            return BankResponse.builder()
-                    .responseCode(AccountUtils.OPERATION_FAILED_CODE)
-                    .message(AccountUtils.OPERATION_FAILED_MESSAGE)
-                    .build();
+            return false;
         }
-        // resp
+        return true;
+    }
+
+    private boolean debit(User user, BigDecimal amount) {
+        //
+        try {
+            user.setBalance(user.getBalance().subtract(amount));
+            userRepository.save(user);
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+            return false;
+        }
+        return true;
+    }
+
+    private EmailDetails creditEmail(User to, BigDecimal amount) {
+        EmailDetails emailDetails = EmailDetails.builder()
+                .recipient(to.getEmail())
+                .subject("Your account has been credited, " + to.getFirstName() + " " + to.getLastName())
+                .body("A credit has just been made to your account!\n Here's the detail:\n" +
+                        "Credit amount: " + amount + "\n" +
+                        "Your account balance has been updated: " + to.getBalance() + "")
+                .build();
+        emailService.sendEmail(emailDetails);
+        return emailDetails;
+    }
+
+    private EmailDetails debitEmail(User to, BigDecimal amount) {
+        EmailDetails emailDetails = EmailDetails.builder()
+                .recipient(to.getEmail())
+                .subject("Your account has been debited, " + to.getFirstName() + " " + to.getLastName())
+                .body("A debit has just been made to your account!\n Here's the detail:\n" +
+                        "Debit amount: " + amount + "\n" +
+                        "Your account balance has been updated: " + to.getBalance() + "")
+                .build();
+        return emailDetails;
+    }
+
+    private BankResponse createAccountNotExistResponse() {
+        return BankResponse.builder()
+                .responseCode(AccountUtils.ACCOUNT_NOT_EXISTED_CODE)
+                .message(AccountUtils.ACCOUNT_NOT_EXISTED_MESSAGE)
+                .build();
+    }
+
+    private BankResponse createAccountExistResponse(User user) {
+        return BankResponse.builder()
+                .responseCode(AccountUtils.ACCOUNT_FOUND_CODE)
+                .message(AccountUtils.ACCOUNT_FOUND_MESSAGE)
+                .accountInfo(AccountInfo.builder()
+                        .accountName(user.getFirstName() + " " + user.getLastName())
+                        .accountNumber(user.getAccountNumber())
+                        .accountBalance(user.getBalance())
+                        .build())
+                .build();
+    }
+
+    private BankResponse createNotEnoughBalanceResponse(User user) {
+        return BankResponse.builder()
+                .responseCode(AccountUtils.NOT_ENOUGH_BALANCES_CODE)
+                .message(AccountUtils.NOT_ENOUGH_BALANCES_MESSAGE)
+                .accountInfo(AccountInfo.builder()
+                        .accountNumber(user.getAccountNumber())
+                        .accountName(user.getFirstName() + " " + user.getLastName())
+                        .accountBalance(user.getBalance())
+                        .build())
+                .build();
+    }
+
+    private BankResponse createOperationFailedResponse() {
+        return BankResponse.builder()
+                .responseCode(AccountUtils.OPERATION_FAILED_CODE)
+                .message(AccountUtils.OPERATION_FAILED_MESSAGE)
+                .build();
+    }
+
+    private BankResponse createOperationSuccessfulResponse(User user) {
         return BankResponse.builder()
                 .responseCode(AccountUtils.OPERATION_SUCCESSFUL_CODE)
                 .message(AccountUtils.OPERATION_SUCCESSFUL_MESSAGE)
@@ -142,4 +282,6 @@ public class UserService {
                         .build())
                 .build();
     }
+
+
 }

@@ -1,9 +1,6 @@
 package imoutstagram.BankingSystem.controller;
 
-import imoutstagram.BankingSystem.dto.BankResponse;
-import imoutstagram.BankingSystem.dto.CreditDebitRequest;
-import imoutstagram.BankingSystem.dto.EnquiryRequest;
-import imoutstagram.BankingSystem.dto.UserRequest;
+import imoutstagram.BankingSystem.dto.*;
 import imoutstagram.BankingSystem.service.UserService;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,6 +32,16 @@ public class UserController {
     @PutMapping(value = "/credit")
     public BankResponse creditAccount(@RequestBody CreditDebitRequest request) {
         return userService.creditAccount(request);
+    }
+
+    @PutMapping(value = "/debit")
+    public BankResponse debitAccount(@RequestBody CreditDebitRequest request) {
+        return userService.debitAccount(request);
+    }
+
+    @PutMapping(value = "/transfer")
+    public BankResponse transferAccount(@RequestBody TransferRequest request) {
+        return userService.transfer(request);
     }
 
 }
